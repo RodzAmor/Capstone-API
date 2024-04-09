@@ -18,3 +18,10 @@ git push azure master
 
 
 # Dont forget to save on git
+
+
+Add Later
+
+
+spacy==3.7.4
+sentence-transformers==2.6.1
