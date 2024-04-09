@@ -75,4 +75,5 @@ jobs:
         with:
           app-name: 'CapstoneWebApi'
           slot-name: 'Production'
+          package: './release.zip'
           
