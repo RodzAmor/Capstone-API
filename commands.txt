@@ -1,0 +1,20 @@
+# Resource Group Name: RodzAmor
+# Service Plan Name: BUFNAPIService
+# App Name: BUFNAPI
+
+az group create --name RodzAmor --location eastus
+az appservice plan create --name BUFNAPI --resource-group RodzAmor --sku B1 --is-linux
+az webapp create --resource-group RodzAmor --plan BUFNAPIService --name BUFNAPI --runtime "PYTHON|3.9" --deployment-local-git
+
+
+# Start, Stop, Restart
+az webapp start --name BUFNAPI --resource-group RodzAmor
+az webapp stop --name BUFNAPI --resource-group RodzAmor
+az webapp restart --name BUFNAPI --resource-group RodzAmor
+
+
+# Push Changes To Azure
+git push azure master
+
+
+# Dont forget to save on git
