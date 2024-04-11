@@ -4,3 +4,4 @@ pandas==2.2.1
 numpy==1.26.4
 spacy==3.7.4
 sentence-transformers==2.6.1
+torch==2.2.2
