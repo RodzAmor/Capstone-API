@@ -73,6 +73,3 @@ jobs:
           app-name: 'FinancialRiskAnalysisToolkit'
           slot-name: 'Production'
           package: .
-
-      - name: Output Web App URL
-        run: echo "Web App URL: ${{ steps.deploy-to-webapp.outputs.webapp-url }}"
