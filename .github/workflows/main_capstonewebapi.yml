@@ -28,8 +28,9 @@ jobs:
           source venv/bin/activate
       
       - name: Install dependencies
-        run: pip install -r requirements.txt
-        run: python -m spacy download en_core_web_sm
+        run: |
+          pip install -r requirements.txt
+          python -m spacy download en_core_web_sm
 
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
