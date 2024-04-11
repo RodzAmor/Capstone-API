@@ -48,7 +48,7 @@ jobs:
     environment:
       name: 'Production'
     permissions:
-      id-token: write #This is required for requesting the JWT
+      id-token: write
 
     steps:
       - name: Download artifact from build job
@@ -74,6 +74,5 @@ jobs:
           slot-name: 'Production'
           package: .
 
-    # Add this step to output the web app URL after deployment
       - name: Output Web App URL
         run: echo "Web App URL: ${{ steps.deploy-to-webapp.outputs.webapp-url }}"
