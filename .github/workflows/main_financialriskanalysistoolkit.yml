@@ -1,7 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
-
 name: Build and deploy Python app to Azure Web App - FinancialRiskAnalysisToolkit
 
 on:
@@ -26,29 +22,31 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-      
+
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
+
+      - name: Download SpaCy English model
+        run: |
+          source venv/bin/activate
+          python -m spacy download en_core_web_sm
+
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: zip -r release.zip . -x venv/\* .git/\* release.zip
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v3
         with:
           name: python-app
-          path: |
-            release.zip
-            !venv/
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
     needs: build
     environment:
       name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
     permissions:
       id-token: write #This is required for requesting the JWT
 
@@ -61,13 +59,12 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
-      
       - name: Login to Azure
         uses: azure/login@v1
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_EB8CF7F7EE6940A3929DAEE4F4A54DD5 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_3002723452C24F65A8B5897BAC2BF7A6 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_63284849FDB8481DB2DB70B379E6EEBA }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID }}
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v2
@@ -75,4 +72,8 @@ jobs:
         with:
           app-name: 'FinancialRiskAnalysisToolkit'
           slot-name: 'Production'
-          
+          package: .
+
+    # Add this step to output the web app URL after deployment
+      - name: Output Web App URL
+        run: echo "Web App URL: ${{ steps.deploy-to-webapp.outputs.webapp-url }}"
