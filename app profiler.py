@@ -1,3 +1,4 @@
+from memory_profiler import profile
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
@@ -6,16 +7,21 @@ from sentence_transformers import SentenceTransformer, util
 import torch
 
 app = Flask(__name__)
-# cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
-# cors = CORS(app, resources={r"/*": {"origins": "*"}})
 cors = CORS(app, supports_credentials=True)
 
+import resource
 
+def print_memory_usage(description="Current memory usage:"):
+    # Get current memory usage in kilobytes
+    usage_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Convert kilobytes to megabytes
+    usage_mb = usage_kb / 1024.0 / 1024.0
+    print(f"{description} {usage_mb} MB")
 
 
 model_name = "all-MiniLM-L6-v2"
 model = SentenceTransformer(model_name)
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_sm", disable=["ner", "lemmatizer"])
 
 def load_data(file_path):
     return pd.read_csv(file_path)
@@ -25,15 +31,10 @@ def segment_text(text):
     doc = nlp(text)
     return [sent.text.strip() for sent in doc.sents]
 
-# Will need to discuss this on the document as a concern
-# Problems with text too long
-# def truncate_text(text, max_length=50000):
-#     return text if len(text) <= max_length else text[:max_length]
-
+@profile
 def process_file(file_path, year, headline):
     data = pd.read_csv(file_path)
-    data['Year'] = pd.to_datetime(data['Fill Date'], utc=True).dt.year
-    # data['Year'] = pd.to_datetime(data['Fill Date']).dt.year
+    data['Year'] = pd.to_datetime(data['Fill Date']).dt.year
     data_filtered = data[data['Year'] == int(year)]
     
     if data_filtered.empty:
@@ -63,6 +64,7 @@ def process_file(file_path, year, headline):
 
 @app.route('/analyze-company', methods=['GET'])
 def analyze_company():
+    print_memory_usage("Before processing:")
     headline = request.args.get('headline', default=None, type=str)
     year = request.args.get('year', default=2024, type=str)
     ticker = request.args.get('ticker', default=2024, type=str)
@@ -82,6 +84,7 @@ def analyze_company():
     result = pd.DataFrame(result)
     result = result.to_json(orient='records')
     print("Finished Analysis\n")
+    print_memory_usage("After processing:")
     return result
 
 
