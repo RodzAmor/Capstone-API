@@ -5,13 +5,12 @@ import spacy
 from sentence_transformers import SentenceTransformer, util
 import torch
 import yfinance as yf
+import os
 
 app = Flask(__name__)
 # cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
 # cors = CORS(app, resources={r"/*": {"origins": "*"}})
 cors = CORS(app, supports_credentials=True)
-
-
 
 
 model_name = "all-MiniLM-L6-v2"
@@ -82,6 +81,13 @@ def process_file(file_path, year, headline):
     }
 
 
+def find_csv_directory(ticker):
+    for root, dirs, files in os.walk('./companies'):
+        for file in files:
+            if file == f"{ticker.upper()}.csv":
+                return root
+    return None 
+
 @app.route('/analyze-company', methods=['GET'])
 def analyze_company():
     headline = request.args.get('headline', default=None, type=str)
@@ -97,7 +103,11 @@ def analyze_company():
     if year is None:
         return jsonify({"Ticker is required.": ""}), 500
 
-    file = f"./companies/{ticker.upper()}.csv"
+    # file = f"./companies/{ticker.upper()}.csv"
+    file = find_csv_directory(ticker) + f"/{ticker.upper()}.csv"
+    if file is None:
+        return None
+    
     result = [process_file(file, year, headline)]
 
     result = pd.DataFrame(result)
@@ -105,7 +115,7 @@ def analyze_company():
     print("Finished Analysis\n")
     return result
 
-
+# Deprecated
 @app.route('/analyze', methods=['GET'])
 def analyze():
     headline = request.args.get('headline', default=None, type=str)
@@ -159,10 +169,38 @@ def company_risk_year():
 
 @app.route('/example', methods=['GET'])
 def example():
-    result = load_data("./companies/example.csv")
+    result = load_data("./example.csv")
     result = result.to_json(orient='records')
     
     return jsonify({"data": result})
+
+@app.route('/get-tickers', methods=['GET'])
+def extract_tickers():
+    farma = request.args.get('farma', default=None, type=str)
+
+    directory = "./companies"
+    farma_maps = {
+        "0": "",
+        "1": "/Consumer/",
+        "2": "/Manufacturing/",
+        "3": "/HiTec/",
+        "4": "/Health and Medical/",
+        "5": "/Energy/",
+        "6": "/Other including Finance/",
+    }
+    if farma:
+        directory += farma_maps[farma]
+
+    tickers = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.csv'):
+                ticker = file.replace('.csv', '')
+                tickers.append(ticker)
+
+    print(tickers)
+    return jsonify({"tickers": tickers})
+
 
 @app.route('/')
 def index():
