@@ -4,6 +4,7 @@ import pandas as pd
 import spacy
 from sentence_transformers import SentenceTransformer, util
 import torch
+import yfinance as yf
 
 app = Flask(__name__)
 # cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
@@ -19,6 +20,26 @@ nlp = spacy.load("en_core_web_sm")
 
 def load_data(file_path):
     return pd.read_csv(file_path)
+
+@app.route('/api/stock/<ticker>')
+def get_stock_data(ticker):
+    stock = yf.Ticker(ticker)
+    
+    year = request.args.get('year', None)
+    if not year:
+        return jsonify({'error': 'Year parameter is required'}), 400
+
+    start_date = f"{year}-01-01"
+    end_date = f"{year}-12-31"
+    
+    hist = stock.history(start=start_date, end=end_date)
+
+    data = [{
+        'date': index.strftime('%Y-%m-%d'),
+        'close': row['Close']
+    } for index, row in hist.iterrows()]
+
+    return jsonify(data)
 
 def segment_text(text):
     # Splits by sentences

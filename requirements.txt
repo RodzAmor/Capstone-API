@@ -5,3 +5,4 @@ spacy
 sentence_transformers
 torch
 gunicorn
+yfinance
