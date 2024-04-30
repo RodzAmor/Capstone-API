@@ -10,7 +10,6 @@ import torch
 import torch
 import yfinance as yf
 import os
-from flask import send_from_directory
 
 app = Flask(__name__)
 # cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
