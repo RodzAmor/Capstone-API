@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 import pandas as pd
 import spacy
@@ -9,6 +9,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import torch
 import torch
 import yfinance as yf
+import os
+from flask import send_from_directory
 
 app = Flask(__name__)
 # cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
@@ -158,6 +160,13 @@ def calculate_jaccard_similarity(file_path, year, headline):
     similarities.sort(key=lambda x: x[1], reverse=True)
     return get_dict(row, headline, similarities[0][1], similarities[0][0])
 
+def find_csv_directory(ticker):
+    for root, dirs, files in os.walk('./companies'):
+        for file in files:
+            if file == f"{ticker.upper()}.csv":
+                return root
+    return None 
+
 @app.route('/analyze-company', methods=['GET'])
 def analyze_company():
     headline = request.args.get('headline', default=None, type=str)
@@ -173,7 +182,11 @@ def analyze_company():
     if year is None:
         return jsonify({"Ticker is required.": ""}), 500
 
-    file = f"./companies/{ticker.upper()}.csv"
+    # file = f"./companies/{ticker.upper()}.csv"
+    file = find_csv_directory(ticker) + f"/{ticker.upper()}.csv"
+    if file is None:
+        return None
+    
     result = [process_file(file, year, headline)]
 
     result = pd.DataFrame(result)
@@ -181,7 +194,7 @@ def analyze_company():
     print("Finished Analysis\n")
     return result
 
-
+# Deprecated
 @app.route('/analyze', methods=['GET'])
 def analyze():
     headline = request.args.get('headline', default=None, type=str)
@@ -235,10 +248,111 @@ def company_risk_year():
 
 @app.route('/example', methods=['GET'])
 def example():
-    result = load_data("./companies/example.csv")
+    result = load_data("./example.csv")
     result = result.to_json(orient='records')
     
     return jsonify({"data": result})
+
+@app.route('/get-tickers', methods=['GET'])
+def extract_tickers():
+    farma = request.args.get('farma', default=None, type=str)
+
+    directory = "./companies"
+    farma_maps = {
+        "0": "",
+        "1": "/Consumer/",
+        "2": "/Manufacturing/",
+        "3": "/HiTec/",
+        "4": "/Health and Medical/",
+        "5": "/Energy/",
+        "6": "/Other including Finance/",
+    }
+    if farma:
+        directory += farma_maps[farma]
+
+    tickers = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.csv'):
+                ticker = file.replace('.csv', '')
+                tickers.append(ticker)
+
+    print(tickers)
+    return jsonify({"tickers": tickers})
+
+@app.route('/get-files', methods=['GET'])
+def get_files():
+    farma = request.args.get('farma', default=None, type=str)
+    search = request.args.get('search', default=None, type=str)
+    if search:
+        search = search.upper()
+
+    
+    directory = "./companies"
+
+
+    farma_maps = {
+        "1": ("/Consumer/", "Consumer"),
+        "2": ("/Manufacturing/", "Manufacturing"),
+        "3": ("/HiTec/", "HiTec"),
+        "4": ("/Health and Medical/", "Health and Medical"),
+        "5": ("/Energy/", "Energy"),
+        "6": ("/Other including Finance/", "Other including Finance"),
+    }
+
+    tickers = []
+    if farma and farma in farma_maps:
+        directory += farma_maps[farma][0]
+        sector_name = farma_maps[farma][1]
+    else:
+        sector_name = None
+
+
+    for root, dirs, files in os.walk(directory):
+        folder_name = os.path.relpath(root, "./companies").replace("/", "")
+        for file in files:
+            if file.endswith('.csv'):
+                ticker = file.replace('.csv', '')
+                if search != None and search not in ticker:
+                    continue
+                    
+                if sector_name:
+                    tickers.append((ticker, sector_name))
+                else:
+                    tickers.append((ticker, folder_name))
+
+    return jsonify({"tickers": tickers})
+
+@app.route('/download-csv/', methods=['GET'])
+def download_csv():
+    sector = request.args.get('sector', type=str)
+    ticker = request.args.get('ticker', type=str)
+
+    if not sector or not ticker:
+        return "Please provide both sector and ticker parameters.", 400
+
+    directory = "./companies"
+    farma_maps = {
+        "Consumer": "/Consumer/",
+        "Manufacturing": "/Manufacturing/",
+        "HiTec": "/HiTec/",
+        "Health and Medical": "/Health and Medical/",
+        "Energy": "/Energy/",
+        "Other including Finance": "/Other including Finance/",
+    }
+
+    if sector in farma_maps:
+        directory += farma_maps[sector]
+    else:
+        return "Invalid sector provided.", 400
+
+    filename = f"{ticker}.csv"
+    file_path = os.path.join(directory, filename)
+
+    if not os.path.isfile(file_path):
+        return f"File '{filename}' not found.", 404
+
+    return send_file(file_path, as_attachment=True)
 
 @app.route('/')
 def index():
