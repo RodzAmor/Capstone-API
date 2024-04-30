@@ -3,6 +3,10 @@ from flask_cors import CORS
 import pandas as pd
 import spacy
 from sentence_transformers import SentenceTransformer, util
+from transformers import BertTokenizer, BertModel
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import torch
 import torch
 import yfinance as yf
 
@@ -12,14 +16,21 @@ app = Flask(__name__)
 cors = CORS(app, supports_credentials=True)
 
 
+# Load pre-trained BERT model and tokenizer
+tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+model = BertModel.from_pretrained("bert-base-uncased")
 
 
 model_name = "all-MiniLM-L6-v2"
 model = SentenceTransformer(model_name)
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_lg")
 
 def load_data(file_path):
     return pd.read_csv(file_path)
+
+def get_doc(text):
+    doc = nlp(text)
+    return doc
 
 @app.route('/api/stock/<ticker>')
 def get_stock_data(ticker):
@@ -46,41 +57,106 @@ def segment_text(text):
     doc = nlp(text)
     return [sent.text.strip() for sent in doc.sents]
 
-# Will need to discuss this on the document as a concern
-# Problems with text too long
-# def truncate_text(text, max_length=50000):
-#     return text if len(text) <= max_length else text[:max_length]
-
-def process_file(file_path, year, headline):
+def get_filtered_data(file_path, year):
     data = pd.read_csv(file_path)
     data['Year'] = pd.to_datetime(data['Fill Date'], utc=True).dt.year
-    # data['Year'] = pd.to_datetime(data['Fill Date']).dt.year
     data_filtered = data[data['Year'] == int(year)]
-    
-    if data_filtered.empty:
-        return None
+    return data_filtered
 
-    row = data_filtered.iloc[0]
-    segments = segment_text(row['Risk Factors Text'])
-    headline_embedding = model.encode([headline], batch_size=32, convert_to_tensor=True)
-
-    segment_embeddings = model.encode(segments, batch_size=32, convert_to_tensor=True)
-
-    similarities = util.pytorch_cos_sim(headline_embedding, segment_embeddings)[0]
-
-    highest_similarity, highest_similarity_idx = torch.max(similarities, dim=0)
-    highest_similarity_segment = segments[highest_similarity_idx]
-
+def get_dict(row, headline, score, segment):
     return {
         "Ticker": row["Ticker"],
         "Company Name": row["Company Name"],
         "Fill Date": row["Fill Date"],
         "Year": row["Year"],
         "Headline": headline,
-        "Highest Similarity Score": highest_similarity.item(),
-        "Risk Section Representative Segment": highest_similarity_segment
+        "Highest Similarity Score": score,
+        "Risk Section Representative Segment": segment
     }
 
+# Will need to discuss this on the document as a concern
+# Problems with text too long
+# def truncate_text(text, max_length=50000):
+#     return text if len(text) <= max_length else text[:max_length]
+
+def process_file(file_path, year, headline):
+    data_filtered = get_filtered_data(file_path, year)
+    if data_filtered.empty:
+        return None
+    row = data_filtered.iloc[0]
+    segments = segment_text(row['Risk Factors Text'])
+    headline_embedding = model.encode([headline], batch_size=32, convert_to_tensor=True)
+    segment_embeddings = model.encode(segments, batch_size=32, convert_to_tensor=True)
+    similarities = util.pytorch_cos_sim(headline_embedding, segment_embeddings)[0]
+    highest_similarity, highest_similarity_idx = torch.max(similarities, dim=0)
+    highest_similarity_segment = segments[highest_similarity_idx]
+    return get_dict(row, headline, highest_similarity.item(), highest_similarity_segment)
+    
+def calculate_nlp_similarity(file_path, year, headline):
+    data_filtered = get_filtered_data(file_path, year)
+    if data_filtered.empty:
+        return None
+    similarities = []
+    row = data_filtered.iloc[0]
+    segment_doc = get_doc(row['Risk Factors Text'])
+    headline_doc = get_doc(headline)
+    for sent in segment_doc.sents:
+        similarity_score = headline_doc.similarity(sent)
+        similarities.append((sent.text, similarity_score))
+    similarities.sort(key=lambda x: x[1], reverse=True)
+    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+    
+def calculate_bert_similarity(file_path, year, headline):
+    data_filtered = get_filtered_data(file_path, year)
+    if data_filtered.empty:
+        return None
+    similarities = []
+    row = data_filtered.iloc[0]
+    segments = segment_text(row['Risk Factors Text'])
+    for segment in segments:
+        input_ids = tokenizer.encode(headline, segment, return_tensors="pt", max_length=5120, truncation=True)
+        with torch.no_grad():
+            outputs = model(input_ids)
+            embeddings = outputs[0].squeeze(0)
+            similarity = torch.cosine_similarity(embeddings[0], embeddings[1], dim=0)
+        similarities.append((segment, similarity))
+    similarities.sort(key=lambda x: x[1], reverse=True)
+    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+    
+def calculate_tfidf_similarity(file_path, year, headline):
+    data_filtered = get_filtered_data(file_path, year)
+    if data_filtered.empty:
+        return None
+    similarities = []
+    row = data_filtered.iloc[0]
+    segments = segment_text(row['Risk Factors Text'])
+    tfidf_vectorizer = TfidfVectorizer()
+    for segment in segments:
+        tfidf_matrix = tfidf_vectorizer.fit_transform([headline, segment])
+        similarity_matrix = cosine_similarity(tfidf_matrix)
+        similarities.append((segment, similarity_matrix[0][1]))
+    similarities.sort(key=lambda x: x[1], reverse=True)
+    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+    
+def get_jaccard_similarity(sentence1, sentence2):
+    set1 = set(sentence1.split())
+    set2 = set(sentence2.split())
+    intersection = len(set1.intersection(set2))
+    union = len(set1.union(set2))
+    jaccard_similarity = intersection / union if union != 0 else 0  # Avoid division by zero
+    return jaccard_similarity
+
+def calculate_jaccard_similarity(file_path, year, headline):
+    data_filtered = get_filtered_data(file_path, year)
+    if data_filtered.empty:
+        return None
+    similarities = []
+    row = data_filtered.iloc[0]
+    segments = segment_text(row['Risk Factors Text'])
+    for segment in segments:
+        similarities.append((segment, get_jaccard_similarity(headline, segment)))
+    similarities.sort(key=lambda x: x[1], reverse=True)
+    return get_dict(row, headline, similarities[0][1], similarities[0][0])
 
 @app.route('/analyze-company', methods=['GET'])
 def analyze_company():
