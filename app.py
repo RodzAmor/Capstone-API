@@ -27,7 +27,8 @@ model = BertModel.from_pretrained("bert-base-uncased")
 
 model_name = "all-MiniLM-L6-v2"
 model = SentenceTransformer(model_name)
-nlp = spacy.load("en_core_web_lg")
+nlp = spacy.load("en_core_web_sm")
+# nlp = spacy.load("en_core_web_lg")
 
 def load_data(file_path):
     return pd.read_csv(file_path)
@@ -67,7 +68,7 @@ def get_filtered_data(file_path, year):
     data_filtered = data[data['Year'] == int(year)]
     return data_filtered
 
-def get_dict(row, headline, score, segment):
+def get_dict(row, headline, score, evaluation="None", segment="None"):
     return {
         "Ticker": row["Ticker"],
         "Company Name": row["Company Name"],
@@ -75,6 +76,7 @@ def get_dict(row, headline, score, segment):
         "Year": row["Year"],
         "Headline": headline,
         "Highest Similarity Score": score,
+        "Similarity Evaluation": evaluation, # This will be a string
         "Risk Section Representative Segment": segment
     }
 
@@ -120,7 +122,16 @@ def process_file(file_path, year, headline):
     similarities = util.pytorch_cos_sim(headline_embedding, segment_embeddings)[0]
     highest_similarity, highest_similarity_idx = torch.max(similarities, dim=0)
     highest_similarity_segment = segments[highest_similarity_idx]
-    return get_dict(row, headline, highest_similarity.item(), highest_similarity_segment)
+
+    similarity_evaluation = None
+    if highest_similarity.item() > 0.3:
+        similarity_evaluation = "High"
+    elif highest_similarity.item() > 0.2:
+        similarity_evaluation = "Medium"
+    else:
+        similarity_evaluation = "Low"
+
+    return get_dict(row, headline, highest_similarity.item(), similarity_evaluation, highest_similarity_segment)
     
 def calculate_nlp_similarity(file_path, year, headline):
     data_filtered = get_filtered_data(file_path, year)
@@ -134,7 +145,16 @@ def calculate_nlp_similarity(file_path, year, headline):
         similarity_score = headline_doc.similarity(sent)
         similarities.append((sent.text, similarity_score))
     similarities.sort(key=lambda x: x[1], reverse=True)
-    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+
+    similarity_evaluation = None
+    if similarity_score > 0.65:
+        similarity_evaluation = "High"
+    elif similarity_score > 0.45:
+        similarity_evaluation = "Medium"
+    else:
+        similarity_evaluation = "Low"
+
+    return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
 def calculate_bert_similarity(file_path, year, headline):
     data_filtered = get_filtered_data(file_path, year)
@@ -151,7 +171,17 @@ def calculate_bert_similarity(file_path, year, headline):
             similarity = torch.cosine_similarity(embeddings[0], embeddings[1], dim=0)
         similarities.append((segment, similarity))
     similarities.sort(key=lambda x: x[1], reverse=True)
-    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+
+
+    similarity_evaluation = None
+    if similarity > 0.65:
+        similarity_evaluation = "High"
+    elif similarity > 0.45:
+        similarity_evaluation = "Medium"
+    else:
+        similarity_evaluation = "Low"
+
+    return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
 def calculate_tfidf_similarity(file_path, year, headline):
     data_filtered = get_filtered_data(file_path, year)
@@ -166,7 +196,16 @@ def calculate_tfidf_similarity(file_path, year, headline):
         similarity_matrix = cosine_similarity(tfidf_matrix)
         similarities.append((segment, similarity_matrix[0][1]))
     similarities.sort(key=lambda x: x[1], reverse=True)
-    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+
+    similarity_evaluation = None
+    if similarities[0][1] > 0.11:
+        similarity_evaluation = "High"
+    elif similarities[0][1] > 0.9:
+        similarity_evaluation = "Medium"
+    else:
+        similarity_evaluation = "Low"
+
+    return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
 def get_jaccard_similarity(sentence1, sentence2):
     set1 = set(sentence1.split())
@@ -186,6 +225,7 @@ def calculate_jaccard_similarity(file_path, year, headline):
     for segment in segments:
         similarities.append((segment, get_jaccard_similarity(headline, segment)))
     similarities.sort(key=lambda x: x[1], reverse=True)
+    
     return get_dict(row, headline, similarities[0][1], similarities[0][0])
 
 def find_csv_directory(ticker):
@@ -199,7 +239,8 @@ def find_csv_directory(ticker):
 def analyze_company():
     headline = request.args.get('headline', default=None, type=str)
     year = request.args.get('year', default=2024, type=str)
-    ticker = request.args.get('ticker', default=2024, type=str)
+    ticker = request.args.get('ticker', default=None, type=str)
+    model = request.args.get('model', default=None, type=str)
     print("Starting Analysis")
     print(f"Headline: {headline}")
     
@@ -207,7 +248,7 @@ def analyze_company():
         return jsonify({"Headline is required.": ""}), 500
     if year is None:
         return jsonify({"Year is required.": ""}), 500
-    if year is None:
+    if ticker is None:
         return jsonify({"Ticker is required.": ""}), 500
 
     # file = f"./companies/{ticker.upper()}.csv"
@@ -215,7 +256,19 @@ def analyze_company():
     if file is None:
         return None
     
-    result = [process_file(file, year, headline)]
+    if model is None or model == "cosine":
+        result = [process_file(file, year, headline)]
+    elif model == "jaccard":
+        result = [calculate_jaccard_similarity(file, year, headline)]
+    elif model == "nlp":
+        result = [calculate_nlp_similarity(file, year, headline)]
+    elif model == "tfidf":
+        result = [calculate_tfidf_similarity(file, year, headline)]
+    elif model == "bert":
+        result = [calculate_bert_similarity(file, year, headline)]
+    else:
+        return None
+
 
     result = pd.DataFrame(result)
     result = result.to_json(orient='records')
@@ -305,7 +358,7 @@ def extract_tickers():
                 ticker = file.replace('.csv', '')
                 tickers.append(ticker)
 
-    print(tickers)
+    # print(tickers)
     return jsonify({"tickers": tickers})
 
 @app.route('/get-files', methods=['GET'])
