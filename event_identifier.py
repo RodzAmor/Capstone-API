@@ -18,7 +18,7 @@ for sector in sectors:
             main_df = pd.concat([main_df, df], ignore_index=True)
             
 model = "gpt-3.5-turbo-0125"
-key = ""#"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"
+key = "" # add key
 
 messages = []
 for index, row in main_df.iterrows():
