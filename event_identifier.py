@@ -18,7 +18,7 @@ for sector in sectors:
             main_df = pd.concat([main_df, df], ignore_index=True)
             
 model = "gpt-3.5-turbo-0125"
-key = "" # add key
+key = "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"
 
 messages = []
 for index, row in main_df.iterrows():
@@ -46,7 +46,6 @@ filtered_msgs = list(map(filter_year, send_messages, years))
 for yearly_msgs in filtered_msgs:
     for msg in yearly_msgs:
         size = len(msg[5].split())
-        print(size)
         if size < 150 or size > 11000:
             msg.append(None)
             continue
