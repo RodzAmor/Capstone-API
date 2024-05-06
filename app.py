@@ -125,11 +125,11 @@ def process_file(file_path, year, headline):
 
     similarity_evaluation = None
     if highest_similarity.item() > 0.3:
-        similarity_evaluation = "High"
+        similarity_evaluation = "High Similarity"
     elif highest_similarity.item() > 0.2:
-        similarity_evaluation = "Medium"
+        similarity_evaluation = "Medium Similarity"
     else:
-        similarity_evaluation = "Low"
+        similarity_evaluation = "Low Similarity"
 
     return get_dict(row, headline, highest_similarity.item(), similarity_evaluation, highest_similarity_segment)
     
@@ -148,11 +148,11 @@ def calculate_nlp_similarity(file_path, year, headline):
 
     similarity_evaluation = None
     if similarity_score > 0.65:
-        similarity_evaluation = "High"
+        similarity_evaluation = "High Similarity"
     elif similarity_score > 0.45:
-        similarity_evaluation = "Medium"
+        similarity_evaluation = "Medium Similarity"
     else:
-        similarity_evaluation = "Low"
+        similarity_evaluation = "Low Similarity"
 
     return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
@@ -175,11 +175,11 @@ def calculate_bert_similarity(file_path, year, headline):
 
     similarity_evaluation = None
     if similarity > 0.65:
-        similarity_evaluation = "High"
+        similarity_evaluation = "High Similarity"
     elif similarity > 0.45:
-        similarity_evaluation = "Medium"
+        similarity_evaluation = "Medium Similarity"
     else:
-        similarity_evaluation = "Low"
+        similarity_evaluation = "Low Similarity"
 
     return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
@@ -199,11 +199,11 @@ def calculate_tfidf_similarity(file_path, year, headline):
 
     similarity_evaluation = None
     if similarities[0][1] > 0.11:
-        similarity_evaluation = "High"
-    elif similarities[0][1] > 0.9:
-        similarity_evaluation = "Medium"
+        similarity_evaluation = "High Similarity"
+    elif similarities[0][1] > 0.09:
+        similarity_evaluation = "Medium Similarity"
     else:
-        similarity_evaluation = "Low"
+        similarity_evaluation = "Low Similarity"
 
     return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
     
@@ -226,7 +226,15 @@ def calculate_jaccard_similarity(file_path, year, headline):
         similarities.append((segment, get_jaccard_similarity(headline, segment)))
     similarities.sort(key=lambda x: x[1], reverse=True)
     
-    return get_dict(row, headline, similarities[0][1], similarities[0][0])
+    similarity_evaluation = None
+    if similarities[0][1] > 0.05:
+        similarity_evaluation = "High Similarity"
+    elif similarities[0][1] > 0.03:
+        similarity_evaluation = "Medium Similarity"
+    else:
+        similarity_evaluation = "Low Similarity"
+
+    return get_dict(row, headline, similarities[0][1], similarity_evaluation, similarities[0][0])
 
 def find_csv_directory(ticker):
     for root, dirs, files in os.walk('./companies'):
