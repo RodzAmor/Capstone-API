@@ -8,9 +8,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
 import torch
+import random
 import yfinance as yf
 import os
 from flask import send_from_directory
+from .scraper import GoogleNewsFeedScraper
 
 app = Flask(__name__)
 # cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
@@ -80,6 +82,32 @@ def get_dict(row, headline, score, segment):
 # Problems with text too long
 # def truncate_text(text, max_length=50000):
 #     return text if len(text) <= max_length else text[:max_length]
+
+def get_events(file_path, year, n=10):
+    default_articles = 15
+    df = pd.read_csv(file_path)
+    df = df[df['Year'] == year]
+    event_list = df['Response'].explode().tolist()
+    samples = random.sample(event_list, n)
+    start_date = '2000-01-01'
+    end_date = f'{year}-12-31'
+    events = []
+    for sample in samples:
+        gnews = GoogleNewsFeedScraper(sample, start_date, end_date)
+        articles = gnews.scrape_google_news_feed()
+        while (len(articles) == 0):
+            new_sample = random.sample(event_list, 1)[0]
+            gnews = GoogleNewsFeedScraper(new_sample, start_date, end_date)
+            articles = gnews.scrape_google_news_feed()
+        ranked_articles = []
+        for i in range(min(len(articles), default_articles)):
+            event_doc = get_doc(sample)
+            article_doc = get_doc(articles[i]['Description'])
+            similarity_score = event_doc.similarity(article_doc)
+            ranked_articles.append((articles[i]['Description'], similarity_score))
+        ranked_articles.sort(key=lambda x: x[1], reverse=True)
+        events.append(ranked_articles[0][0])
+    return events
 
 def process_file(file_path, year, headline):
     data_filtered = get_filtered_data(file_path, year)
