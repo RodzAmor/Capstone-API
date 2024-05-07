@@ -11,14 +11,15 @@ import torch
 import random
 import yfinance as yf
 import os
-from flask import send_from_directory
-from .scraper import GoogleNewsFeedScraper
+from scraper import GoogleNewsFeedScraper
+
+import ast
+from itertools import chain
+import networkx as nx
+
 
 app = Flask(__name__)
-# cors = CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}}, supports_credentials=True)
-# cors = CORS(app, resources={r"/*": {"origins": "*"}})
 cors = CORS(app, supports_credentials=True)
-
 
 # Load pre-trained BERT model and tokenizer
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
@@ -27,8 +28,8 @@ model = BertModel.from_pretrained("bert-base-uncased")
 
 model_name = "all-MiniLM-L6-v2"
 model = SentenceTransformer(model_name)
-nlp = spacy.load("en_core_web_sm")
-# nlp = spacy.load("en_core_web_lg")
+# nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_lg")
 
 def load_data(file_path):
     return pd.read_csv(file_path)
@@ -49,13 +50,27 @@ def get_stock_data(ticker):
     end_date = f"{year}-12-31"
     
     hist = stock.history(start=start_date, end=end_date)
+    info = stock.info
 
     data = [{
         'date': index.strftime('%Y-%m-%d'),
         'close': row['Close']
     } for index, row in hist.iterrows()]
 
-    return jsonify(data)
+    print(info.get('totalRevenue'))
+
+    # Include detailed company information
+    additional_info = {
+        'fullName': info.get('longName'),
+        'revenue': info.get('totalRevenue'),
+        'ebitda': info.get('ebitda'),
+        'employees': info.get('fullTimeEmployees'),
+        'headquarters': f"{info.get('city')}, {info.get('state')}, {info.get('country')}",
+        'website': info.get('website'),
+        'description': info.get('longBusinessSummary')
+    }
+
+    return jsonify({'historicalData': data, 'companyInfo': additional_info})
 
 def segment_text(text):
     # Splits by sentences
@@ -85,10 +100,16 @@ def get_dict(row, headline, score, evaluation="None", segment="None"):
 # def truncate_text(text, max_length=50000):
 #     return text if len(text) <= max_length else text[:max_length]
 
-def get_events(file_path, year, n=10):
+@app.route('/get-events', methods=['GET'])
+def get_events():
+    file_path = "events.csv"
+    year = 2010
+    n=10
+
     default_articles = 15
     df = pd.read_csv(file_path)
     df = df[df['Year'] == year]
+
     event_list = df['Response'].explode().tolist()
     samples = random.sample(event_list, n)
     start_date = '2000-01-01'
@@ -442,6 +463,132 @@ def download_csv():
         return f"File '{filename}' not found.", 404
 
     return send_file(file_path, as_attachment=True)
+
+
+@app.route('/api/graph-data')
+def get_graph_data():
+    # year = request.args.get('year', type=int, default=None)
+    sectors = {
+        "1": "Consumer",
+        "2": "Manufacturing",
+        "3": "HiTec",
+        "4": "Health and Medical",
+        "5": "Energy",
+        "6": "Other including Finance"
+    }
+
+    sector_colors = {
+        "1": "#3498db",  # Consumer - Blue
+        "2": "#2ecc71",  # Manufacturing - Green
+        "3": "#f39c12",  # HiTec - Orange
+        "4": "#e74c3c",  # Health and Medical - Red
+        "5": "#9b59b6",  # Energy - Purple
+        "6": "#FA8072"   # Other including Finance - Salmon
+    }
+
+    event_colors = {
+        "General": "#e74c3c",
+        "Weather": "#3498db",
+        "Political": "#f1c40f",
+        "Economy": "#2ecc71",
+        "Energy": "#9b59b6",
+        "Business": "#34495e"
+    }
+    
+    # Load the CSV file
+    events_data = pd.read_csv("events.csv")
+
+    # if year is not None:
+    #     events_data = events_data[events_data["Year"] == year]
+
+    events_data['Parsed_Response'] = events_data['Response'].apply(ast.literal_eval)
+
+    
+    def find_sector(ticker):
+        directory = find_csv_directory(ticker)
+        farma_maps = {
+            "Consumer": "1",
+            "Manufacturing": "2",
+            "HiTec": "3",
+            "Health and Medical": "4",
+            "Energy": "5",
+            "Other including Finance": "6"
+        }
+
+        if directory is None:
+            directory = "Other including Finance"
+        
+        return farma_maps.get(os.path.basename(directory), "6"), farma_maps.get(os.path.basename(directory), directory)
+
+
+    # Count how many companies share each event
+    from collections import defaultdict
+    event_to_companies = defaultdict(set)
+    company_set = defaultdict(set)
+    count = 0
+    for _, row in events_data.iterrows():
+        for event in row['Parsed_Response']:
+
+            reverse_farma_maps = {
+                "1": "Consumer",
+                "2": "Manufacturing",
+                "3": "HiTec",
+                "4": "Health and Medical",
+                "5": "Energy",
+                "6": "Other including Finance"
+            }
+            
+            sector_num, farma = find_sector(row['Ticker'])
+
+            if not row['Company Name'] in company_set[event]:
+                event_to_companies[event].add((row['Company Name'], f"{count}", row['Ticker'], sector_colors[sector_num], reverse_farma_maps[farma], row["Response"], row['Year']))
+                company_set[event].add(row['Company Name'])
+
+            count += 1
+            # event_to_companies[event].add(row['Company Name'])
+
+    # Keep only events shared by multiple companies
+    shared_events = {event: companies for event, companies in event_to_companies.items() if len(companies) > 1}
+
+    # Create a bipartite graph for shared events
+    B_shared = nx.Graph()
+    shared_company_nodes = set(chain.from_iterable(shared_events.values()))
+    B_shared.add_nodes_from(shared_company_nodes, bipartite=0)
+    B_shared.add_nodes_from(shared_events.keys(), bipartite=1)
+    print(shared_events)
+    shared_edges = [(company[0] + company[1], event) for event, companies in shared_events.items() for company in companies]
+    B_shared.add_edges_from(shared_edges)
+
+    # Prepare data for visualization
+    graph_data = {
+        "nodes": [
+            {
+                "id": company[0] + company[1],
+                "label": company[0], 
+                "shape": "circle", 
+                "color": company[3],
+                "sector": f"{company[4]}",
+                "ticker": f"{company[2]}",
+                "year": f"{company[6]}",
+                "response": f"{company[5]}"
+            }
+            for company in shared_company_nodes
+        ] + [
+            {
+                "id": event, 
+                "label": event, 
+                "shape": "square", 
+                "color": "#e74c3c", 
+                "title": "Event",
+                "connected_companies": [company[0] for company in shared_events[event]],
+                }
+            for event in shared_events.keys()
+        ],
+        "edges": [{"from": u, "to": v} for u, v in B_shared.edges]
+    }
+
+    return jsonify(graph_data)
+
 
 @app.route('/')
 def index():
