@@ -12,7 +12,7 @@ import random
 import yfinance as yf
 import os
 from scraper import GoogleNewsFeedScraper
-
+from collections import defaultdict
 import ast
 from itertools import chain
 import networkx as nx
@@ -467,15 +467,11 @@ def download_csv():
 
 @app.route('/api/graph-data')
 def get_graph_data():
-    # year = request.args.get('year', type=int, default=None)
-    sectors = {
-        "1": "Consumer",
-        "2": "Manufacturing",
-        "3": "HiTec",
-        "4": "Health and Medical",
-        "5": "Energy",
-        "6": "Other including Finance"
-    }
+    min_connections = request.args.get('minConnections', default=2, type=str)
+    min_connections = int(min_connections)
+    sector_filter = request.args.get('sector', default="All", type=str)
+    event_type_filter = request.args.get('type', default="All", type=str)
+
 
     sector_colors = {
         "1": "#3498db",  # Consumer - Blue
@@ -487,21 +483,20 @@ def get_graph_data():
     }
 
     event_colors = {
-        "General": "#e74c3c",
-        "Weather": "#3498db",
-        "Political": "#f1c40f",
-        "Economy": "#2ecc71",
-        "Energy": "#9b59b6",
-        "Business": "#34495e"
+        "General": "#ffd6ba",
+        "Weather": "#5DADE2",
+        "Political": "#F1C40F",
+        "Economy": "#417B5A",
+        "Energy": "#E67E22",
+        "Business": "#8E44AD"
     }
     
     # Load the CSV file
-    events_data = pd.read_csv("events.csv")
-
-    # if year is not None:
-    #     events_data = events_data[events_data["Year"] == year]
+    events_data = pd.read_csv("labeled_events.csv")
 
     events_data['Parsed_Response'] = events_data['Response'].apply(ast.literal_eval)
+    events_data['Parsed_Event_Type'] = events_data['Event Type NLP'].apply(ast.literal_eval)  # Assuming Event_Type is also stored as a list
+    # print(events_data['Parsed_Event_Type'])
 
     
     def find_sector(ticker):
@@ -522,13 +517,16 @@ def get_graph_data():
 
 
     # Count how many companies share each event
-    from collections import defaultdict
     event_to_companies = defaultdict(set)
     company_set = defaultdict(set)
+    # event_types = defaultdict(set)
+
+    event_type_map = {}
+
     count = 0
     for _, row in events_data.iterrows():
-        for event in row['Parsed_Response']:
-
+        # for event in row['Parsed_Response']:
+        for event, event_type in zip(row['Parsed_Response'], row['Parsed_Event_Type']):
             reverse_farma_maps = {
                 "1": "Consumer",
                 "2": "Manufacturing",
@@ -537,25 +535,29 @@ def get_graph_data():
                 "5": "Energy",
                 "6": "Other including Finance"
             }
+
+            # event_types[event_type].add(event_type)
             
+            event_type_map[event] = event_type
             sector_num, farma = find_sector(row['Ticker'])
 
             if not row['Company Name'] in company_set[event]:
-                event_to_companies[event].add((row['Company Name'], f"{count}", row['Ticker'], sector_colors[sector_num], reverse_farma_maps[farma], row["Response"], row['Year']))
-                company_set[event].add(row['Company Name'])
+                # Sector = reverse_farma_maps[farma]
+                if sector_filter == "All" or reverse_farma_maps[farma] == sector_filter:
+                    event_to_companies[event].add((row['Company Name'], f"{count}", row['Ticker'], sector_colors[sector_num], reverse_farma_maps[farma], row["Response"], row['Year']))
+                    company_set[event].add(row['Company Name'])
 
             count += 1
-            # event_to_companies[event].add(row['Company Name'])
 
     # Keep only events shared by multiple companies
-    shared_events = {event: companies for event, companies in event_to_companies.items() if len(companies) > 1}
+    shared_events = {event: companies for event, companies in event_to_companies.items() if len(companies) >= min_connections and (event_type_filter == "All" or event_type_map[event] == event_type_filter)}
 
     # Create a bipartite graph for shared events
     B_shared = nx.Graph()
     shared_company_nodes = set(chain.from_iterable(shared_events.values()))
     B_shared.add_nodes_from(shared_company_nodes, bipartite=0)
     B_shared.add_nodes_from(shared_events.keys(), bipartite=1)
-    print(shared_events)
+    # print(shared_events)
     shared_edges = [(company[0] + company[1], event) for event, companies in shared_events.items() for company in companies]
     B_shared.add_edges_from(shared_edges)
 
@@ -572,17 +574,20 @@ def get_graph_data():
                 "year": f"{company[6]}",
                 "response": f"{company[5]}"
             }
-            for company in shared_company_nodes
+            for company in shared_company_nodes 
+            # if sector_filter == "All" or company[4] == sector_filter
         ] + [
             {
                 "id": event, 
                 "label": event, 
                 "shape": "square", 
-                "color": "#e74c3c", 
+                "color": event_colors[event_type_map[event]], 
                 "title": "Event",
                 "connected_companies": [company[0] for company in shared_events[event]],
+                "event_type": event_type_map[event]
                 }
-            for event in shared_events.keys()
+            for event in shared_events.keys() 
+            # if event_type_filer == "All" or event_type_map[event] == event_type_filer
         ],
         "edges": [{"from": u, "to": v} for u, v in B_shared.edges]
     }
